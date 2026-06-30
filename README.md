@@ -191,4 +191,4 @@ Use `--kl_lambda 0.0` for the one-sided loss.
 
 ## Data and Code Availability
 
-The code and generated datasets used for the manuscript should be deposited in a persistent public repository before publication. The final archived version should include a DOI and should match the version cited in the manuscript Data Availability Statement.
+The code and generated datasets supporting this work are provided with this repository for review. The final archived version will be deposited in a persistent public repository, and the DOI will be added to this README and to the manuscript Data Availability Statement before publication.
