@@ -12,12 +12,7 @@ run_lammps.sh
 plot_distributions.py
 ```
 
-Rename files if needed:
-
-```bash
-mv generate_input_files.py gener.py
-mv 'data(3).polyLJ' data.polyLJ
-```
+Rename files if needed.
 
 Create trajectory folders. Replace `100` with the desired number of trajectories:
 
