@@ -1,18 +1,51 @@
-# LAMMPS Dataset Generation
+# Toy Four-Bead DDPM Inverse Optimization
+
+This repository contains scripts used to generate LAMMPS trajectories for a four-bead Lennard-Jones toy system and to perform DDPM-based inverse optimization of the interaction parameters (\epsilon_1) and (\epsilon_2).
+
+## Repository Structure
+
+```bash
+lammps_generation/
+  data.polyLJ
+  gener.py
+  prepare_simulation_runs.sh
+  run_lammps.sh
+  plot_distributions.py
+
+ddpm_inverse_optimization/
+  dataset.py
+  model.py
+  train.py
+  loss.py
+  sampler.py
+  utils.py
+  plotters.py
+  ddpm_to_publish.py
+```
+
+Rename folders or files if needed, but keep the same relative structure when running the commands below.
+
+## Requirements
+
+The LAMMPS dataset generation requires a working LAMMPS executable.
+
+The DDPM inverse optimization requires Python with:
+
+```bash
+torch
+numpy
+matplotlib
+```
+
+## LAMMPS Dataset Generation
 
 This section generates multiple randomized LAMMPS trajectories.
 
-Expected files in the repo root:
+Move to the LAMMPS generation folder:
 
 ```bash
-data.polyLJ
-gener.py
-prepare_simulation_runs.sh
-run_lammps.sh
-plot_distributions.py
+cd lammps_generation
 ```
-
-Rename files if needed.
 
 Create trajectory folders. Replace `100` with the desired number of trajectories:
 
@@ -38,28 +71,29 @@ Optional: plot angle distributions after the simulations finish:
 python3 plot_distributions.py .
 ```
 
-# DDPM Inverse Optimization
+Each trajectory folder should contain at least:
+
+```bash
+in.in
+data.polyLJ
+dump.lammpstrj
+```
+
+## DDPM Inverse Optimization
 
 This section trains or loads the DDPM model and optimizes epsilon values against each trajectory in the dataset.
 
-Expected files in the DDPM method folder:
+Move to the DDPM method folder:
 
 ```bash
-dataset.py
-model.py
-train.py
-loss.py
-sampler.py
-utils.py
-plotters.py
-ddpm_to_publish.py
+cd ddpm_inverse_optimization
 ```
 
 Run optimization over the full dataset. Replace the dataset path and starting epsilons:
 
 ```bash
 python3 ddpm_to_publish.py \
-  --path /path/to/lammps_dataset \
+  --path ../lammps_generation \
   --eps1 0.25 \
   --eps2 1.4
 ```
@@ -85,7 +119,7 @@ Optional example with changed settings:
 
 ```bash
 python3 ddpm_to_publish.py \
-  --path /path/to/lammps_dataset \
+  --path ../lammps_generation \
   --eps1 0.25 \
   --eps2 1.4 \
   --steps 100 \
@@ -94,9 +128,67 @@ python3 ddpm_to_publish.py \
   --no-plot-loss-surface
 ```
 
-Outputs are written to trajectory-specific optimization folders and to:
+## Outputs
+
+The optimization writes trajectory-specific folders containing free-energy plots and optimization diagnostics.
+
+The summary table is written to:
 
 ```bash
 results_evaluation.csv
 ```
 
+The CSV contains:
+
+```bash
+trajID
+start_id
+start_eps1
+start_eps2
+clamp_eps
+eps1_target
+eps2_target
+final_eps1
+final_eps2
+phase0_best_eps1
+phase0_best_eps2
+phase0_best_loss
+phase1_best_eps1
+phase1_best_eps2
+phase1_best_loss
+eval_phase
+target_type
+active_names
+missing_active_basin
+df_target
+df_generated
+df_abs_error
+df_mae
+df_median_abs_error
+```
+
+## Reproducibility Notes
+
+The random seed can be changed with:
+
+```bash
+--seed <integer>
+```
+
+The starting epsilon values are set with:
+
+```bash
+--eps1 <value> --eps2 <value>
+```
+
+The symmetric KDE loss weight is controlled by:
+
+```bash
+--kl_lambda <value>
+```
+
+Use `--kl_lambda 0.0` for the one-sided loss.
+
+## Data and Code Availability
+
+The code and generated datasets used for the manuscript should be deposited in a persistent public repository before publication. The final archived version should include a DOI and should match the version cited in the manuscript Data Availability Statement.
