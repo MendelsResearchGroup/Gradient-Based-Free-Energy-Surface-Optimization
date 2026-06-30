@@ -1,38 +1,44 @@
 # LAMMPS Dataset Generation
 
-Generate multiple LAMMPS trajectories from randomized input files.
+This repo generates multiple randomized LAMMPS trajectories.
 
+Expected files in the repo root:
 
-## 1. Create trajectory folders
+```bash
+data.polyLJ
+gener.py
+prepare_simulation_runs.sh
+run_lammps.sh
+plot_distributions.py
+```
 
-Replace `100` with the number of trajectories you want:
+Rename files if needed:
+
+```bash
+mv generate_input_files.py gener.py
+mv 'data(3).polyLJ' data.polyLJ
+```
+
+Create trajectory folders. Replace `100` with the desired number of trajectories:
 
 ```bash
 mkdir {001..100}
 ```
 
-## 2. Generate input files
+Generate `in.in` and copy `data.polyLJ` into each trajectory folder:
 
 ```bash
 ./prepare_simulation_runs.sh .
 ```
 
-This creates one `in.in` per trajectory folder and copies `data.polyLJ` into each folder.
-
-## 3. Run LAMMPS
+Run LAMMPS in every trajectory folder:
 
 ```bash
 ./run_lammps.sh /home/user/lammps/build/lmp -in in.in
 ```
 
-The script runs the command inside every trajectory folder.
-
-## 4. Optional: plot distributions
-
-After simulations finish:
+Optional: plot angle distributions after the simulations finish:
 
 ```bash
 python3 plot_distributions.py .
 ```
-
-This creates angle heatmap PNG files in the root directory.
