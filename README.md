@@ -1,6 +1,6 @@
 # LAMMPS Dataset Generation
 
-This repo generates multiple randomized LAMMPS trajectories.
+This section generates multiple randomized LAMMPS trajectories.
 
 Expected files in the repo root:
 
