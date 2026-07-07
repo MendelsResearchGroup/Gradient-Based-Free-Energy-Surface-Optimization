@@ -447,14 +447,3 @@ class GeometryFrameDataset(Dataset):
         eps = torch.from_numpy(np.asarray(self.eps_raw[tid], dtype=np.float32))
         return x0, eps, torch.tensor(tid, dtype=torch.int64)
 
-
-# Backward-compatible names used by the rest of the project.
-LammpsTrajectoryAngleDataset = LammpsTrajectoryGeometryDataset
-AngleFrameDataset = GeometryFrameDataset
-
-
-if __name__ == "__main__":
-    ds = LammpsTrajectoryGeometryDataset("/media/tono/AllocatedLnx1/Projects/lammps/chains/4_2eps/")
-    sample0 = ds[0]
-    print(sample0["target_columns"])
-    print(sample0["target"][100:105])
