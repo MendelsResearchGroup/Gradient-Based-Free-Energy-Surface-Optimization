@@ -1,6 +1,6 @@
 # Toy Four-Bead DDPM Inverse Optimization
 
-This repository contains scripts used to generate LAMMPS trajectories for a four-bead Lennard-Jones toy system and to perform DDPM-based inverse optimization of the interaction parameters (\epsilon_1) and (\epsilon_2).
+This repository contains scripts used to generate LAMMPS trajectories for a four-bead Lennard-Jones toy system and to perform DDPM-based inverse optimization of the interaction parameters (epsilon_1) and (epsilon_2).
 
 ## Repository Structure
 
