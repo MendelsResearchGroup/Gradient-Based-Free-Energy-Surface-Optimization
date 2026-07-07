@@ -334,9 +334,6 @@ def optimize_condition_via_sampler(
     return checkpoints, (m_dec, v_dec), kl_hist
 
 
-# ----------------------------
-# Publication-style PNG plot
-# ----------------------------
 @torch.no_grad()
 def plot_all(
     model: EpsModel,
