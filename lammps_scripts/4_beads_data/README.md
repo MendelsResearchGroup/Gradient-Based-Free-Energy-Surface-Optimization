@@ -56,19 +56,3 @@ python3 plot_distributions.py .
 This writes `001_angle_heatmap.png`, etc., alongside the trajectory folders.
 On a machine without a display, prefix the command with `MPLBACKEND=Agg`.
 
-
-`gener.py` defines the simulation in reduced Lennard-Jones units:
-
-- Four unit-mass beads in a periodic 2D box, connected by three harmonic bonds
-  with coefficient `0.15` and equilibrium length `1.5`.
-- Sigma is `1.0` and the LJ cutoff is `4.0`. LJ interactions include bonded pairs.
-- Epsilon 1 is sampled uniformly from `[0.21, 1.55]` for pairs 1–2, 2–3, and 3–4.
-- Epsilon 2 is sampled independently from `[0.21, 1.55]` for pairs 1–3 and 2–4.
-- The 1–4 epsilon is fixed at `0.5`; same-type epsilons are zero.
-- Langevin temperature `0.09`, damping time `1.0`, and timestep `0.005`.
-- 4,000,000 steps, with a frame every 200 steps: 20,001 frames including step zero.
-
-The initial velocities and Langevin thermostat use the fixed seed `12345`;
-epsilon sampling is unseeded. The sampled values are saved in each `in.in`.
-The plots use all frames with minimum-image bond vectors and no equilibration
-discard. Equilibrium or independent sampling is not established by these plots.
