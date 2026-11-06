@@ -58,4 +58,8 @@ dump.lammpstrj
 log.lammps
 ```
 
-The trajectories are raw simulation output; no contact filtering is applied.
+Run remove_no_contact.py keep only frames in contact:
+
+```bash
+python remove_no_contact.py
+```
