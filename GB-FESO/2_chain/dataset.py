@@ -1,335 +1,420 @@
-from bisect import bisect_right
+"""Read four-bead LAMMPS trajectories as three distances and two signed angles.
+
+Distances use minimum-image displacements in an orthogonal periodic box.
+Angles are measured in the xy plane, in radians. Trajectory directories are
+sorted by name, so use zero-padded names such as 001, 002, ...
+"""
+
+import bisect
+import math
+import re
+from dataclasses import dataclass
 from pathlib import Path
-import warnings
 
 import numpy as np
 import torch
-from torch.utils.data import Dataset, Subset
+from torch.utils.data import Dataset
+
+_PAIR_COEFF_RE = re.compile(
+    r"^\s*pair_coeff\s+(\d+)\s+(\d+)\s+([0-9eE+\-\.]+)\s+([0-9eE+\-\.]+)"
+)
+
+TARGET_COLUMNS = ("r12", "r23", "r34", "theta123", "theta234")
+DISTANCE_COLUMNS = TARGET_COLUMNS[:3]
+ANGLE_COLUMNS = TARGET_COLUMNS[3:]
 
 
-START_STEP = 1000
-CONTACT_CUTOFF = 2.25
-ATOM_IDS = np.arange(1, 11)
+def _min_image(delta: float, length: float) -> float:
+    return delta - length * round(delta / length)
 
 
-class LammpsDistanceDataset(Dataset):
-    """Labeled 2D distances and ten epsilons from numbered LAMMPS folders.
+def _pbc_vec(
+    a_xyz: tuple[float, float, float],
+    b_xyz: tuple[float, float, float],
+    Lx: float,
+    Ly: float,
+    Lz: float,
+) -> tuple[float, float, float]:
+    """Minimum-image vector from b to a."""
+    dx = _min_image(a_xyz[0] - b_xyz[0], Lx)
+    dy = _min_image(a_xyz[1] - b_xyz[1], Ly)
+    dz = _min_image(a_xyz[2] - b_xyz[2], Lz)
+    return dx, dy, dz
 
-    Retain frames at/after start_step with an inter-chain distance <= cutoff.
-    Use minimum-image x/y distances in orthogonal boxes; atom types equal IDs.
-    Items contain frame_id, trajectory_id, epsilons (10,), distances (10, 10).
-    Ranges are reported without normalization. Incomplete frames are skipped.
+
+def _norm3(v: tuple[float, float, float]) -> float:
+    return math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
+
+
+def _signed_angle_xy(u, v) -> float:
+    """Signed angle from u to v in the xy plane, in [-pi, pi]."""
+    ux, uy = u[0], u[1]
+    vx, vy = v[0], v[1]
+    cross = ux * vy - uy * vx
+    dot = ux * vx + uy * vy
+    return math.atan2(cross, dot)
+
+
+def read_epsilons_from_in(
+    in_path: str,
+    eps_pairs=((1, 2), (2, 4)),
+) -> tuple[float, float]:
+    """Read eps1 and eps2 from the selected pair_coeff lines in in.in."""
+    wanted = [tuple(sorted(pair)) for pair in eps_pairs]
+    found = {}
+
+    with open(in_path, "r", encoding="utf-8") as f:
+        for line in f:
+            m = _PAIR_COEFF_RE.match(line)
+            if not m:
+                continue
+
+            i = int(m.group(1))
+            j = int(m.group(2))
+            pair = tuple(sorted((i, j)))
+            if pair not in wanted:
+                continue
+
+            eps = float(m.group(3))
+            sigma = float(m.group(4))
+            if sigma == 0.0:
+                raise ValueError(f"Parsed sigma=0 from {in_path}, line: {line.strip()}")
+            found[pair] = eps
+
+    missing = [pair for pair in wanted if pair not in found]
+    if missing:
+        missing_str = ", ".join(f"{i} {j}" for i, j in missing)
+        raise ValueError(f"Could not find required pair_coeff epsilon(s) for pair(s) {missing_str} in: {in_path}")
+
+    return tuple(found[pair] for pair in wanted)
+
+
+def parse_dump_geometry(
+    dump_path: str,
+    atom_ids=(1, 2, 3, 4),
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return timesteps and [r12, r23, r34, theta123, theta234] per frame.
+
+    Requires id, x, y, z columns and an orthogonal box. theta123 runs from
+    2->1 to 2->3; theta234 runs from 3->2 to 3->4. Frames missing any selected
+    atom are skipped.
+    """
+    a1, a2, a3, a4 = atom_ids
+    timesteps = []
+    targets = []
+
+    with open(dump_path, "r", encoding="utf-8") as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            if not line.startswith("ITEM: TIMESTEP"):
+                continue
+
+            ts_line = f.readline()
+            if not ts_line:
+                break
+            ts = int(ts_line.strip())
+
+            line = f.readline()
+            if not line.startswith("ITEM: NUMBER OF ATOMS"):
+                raise ValueError(f"Unexpected dump format near: {line.strip()}")
+            natoms = int(f.readline().strip())
+
+            line = f.readline()
+            if not line.startswith("ITEM: BOX BOUNDS"):
+                raise ValueError(f"Unexpected dump format near: {line.strip()}")
+            xlo, xhi = map(float, f.readline().split()[:2])
+            ylo, yhi = map(float, f.readline().split()[:2])
+            zlo, zhi = map(float, f.readline().split()[:2])
+
+            Lx = xhi - xlo
+            Ly = yhi - ylo
+            Lz = zhi - zlo
+            if Lx <= 0 or Ly <= 0 or Lz <= 0:
+                raise ValueError(f"Non-positive box length in {dump_path}: Lx={Lx}, Ly={Ly}, Lz={Lz}")
+
+            line = f.readline()
+            if not line.startswith("ITEM: ATOMS"):
+                raise ValueError(f"Unexpected dump format near: {line.strip()}")
+
+            cols = line.strip().split()[2:]
+            try:
+                id_i = cols.index("id")
+                x_i = cols.index("x")
+                y_i = cols.index("y")
+                z_i = cols.index("z")
+            except ValueError as e:
+                raise ValueError(f"Dump missing required columns (id,x,y,z). Found: {cols}") from e
+
+            pos = {}
+            wanted = {a1, a2, a3, a4}
+
+            for _ in range(natoms):
+                parts = f.readline().split()
+                if not parts:
+                    break
+                aid = int(parts[id_i])
+                if aid in wanted:
+                    pos[aid] = (float(parts[x_i]), float(parts[y_i]), float(parts[z_i]))
+
+            if any(a not in pos for a in (a1, a2, a3, a4)):
+                continue
+
+            r1, r2, r3, r4 = pos[a1], pos[a2], pos[a3], pos[a4]
+            v21 = _pbc_vec(r1, r2, Lx, Ly, Lz)
+            v23 = _pbc_vec(r3, r2, Lx, Ly, Lz)
+            v32 = _pbc_vec(r2, r3, Lx, Ly, Lz)
+            v34 = _pbc_vec(r4, r3, Lx, Ly, Lz)
+
+            r12 = _norm3(v21)
+            r23 = _norm3(v23)
+            r34 = _norm3(v34)
+            th123 = _signed_angle_xy(v21, v23)
+            th234 = _signed_angle_xy(v32, v34)
+
+            timesteps.append(ts)
+            targets.append((r12, r23, r34, th123, th234))
+
+    return np.asarray(timesteps, dtype=np.int64), np.asarray(targets, dtype=np.float32).reshape(-1, 5)
+
+
+def parse_dump_angles(
+    dump_path: str,
+    atom_ids=(1, 2, 3, 4),
+) -> tuple[np.ndarray, np.ndarray]:
+    """Read only the signed angles [theta123, theta234]."""
+    timesteps, target = parse_dump_geometry(dump_path, atom_ids=atom_ids)
+    return timesteps, target[:, 3:5]
+
+
+@dataclass(frozen=True)
+class TrajectoryInfo:
+    traj_id: int
+    name: str
+    dump_path: str
+    in_path: str
+    eps1: float
+    eps2: float
+    nframes: int
+
+
+class LammpsTrajectoryGeometryDataset(Dataset):
+    """One item per trajectory, with raw geometry shaped [frames, 5]."""
+
+    target_columns = TARGET_COLUMNS
+
+    def __init__(
+        self,
+        root_dir: str,
+        dump_filename: str = "dump.lammpstrj",
+        in_filename: str = "in.in",
+        atom_ids=(1, 2, 3, 4),
+    ):
+        self.root_dir = str(Path(root_dir).resolve())
+        self.atom_ids = atom_ids
+
+        traj_dirs = []
+        for path in sorted(Path(self.root_dir).iterdir()):
+            if not path.is_dir():
+                continue
+            dump_path = path / dump_filename
+            in_path = path / in_filename
+            if dump_path.is_file() and in_path.is_file():
+                traj_dirs.append((path.name, str(dump_path), str(in_path)))
+
+        if not traj_dirs:
+            raise FileNotFoundError(
+                f"No trajectories found in {self.root_dir} (expected subdirs with {dump_filename} and {in_filename})."
+            )
+
+        self._info = []
+        self._name_to_id = {}
+        self._timesteps = []
+        self._targets = []
+        self._eps = []
+
+        for traj_id, (name, dump_path, in_path) in enumerate(traj_dirs):
+            eps1, eps2 = read_epsilons_from_in(in_path)
+            ts_np, target_np = parse_dump_geometry(dump_path, atom_ids=atom_ids)
+
+            self._info.append(
+                TrajectoryInfo(
+                    traj_id=traj_id,
+                    name=name,
+                    dump_path=dump_path,
+                    in_path=in_path,
+                    eps1=eps1,
+                    eps2=eps2,
+                    nframes=int(target_np.shape[0]),
+                )
+            )
+            self._name_to_id[name] = traj_id
+            self._eps.append((eps1, eps2))
+            self._timesteps.append(torch.from_numpy(ts_np))
+            self._targets.append(torch.from_numpy(target_np))
+
+    def __len__(self) -> int:
+        return len(self._info)
+
+    def __getitem__(self, traj_id: int) -> dict:
+        info = self._info[traj_id]
+        eps = torch.tensor([info.eps1, info.eps2], dtype=torch.float32)
+        target = self._targets[traj_id]
+        return {
+            "traj_id": info.traj_id,
+            "name": info.name,
+            "eps1": eps[0],
+            "eps2": eps[1],
+            "eps": eps,
+            "timesteps": self._timesteps[traj_id],
+            "target": target,
+            "geometry": target,
+            "distances": target[:, 0:3],
+            "angles": target[:, 3:5],
+            "target_columns": TARGET_COLUMNS,
+        }
+
+    def infos(self) -> list[TrajectoryInfo]:
+        return list(self._info)
+
+    def name_to_id(self, name: str) -> int:
+        return self._name_to_id[name]
+
+    def get_epsilons(self, traj_id: int) -> tuple[float, float]:
+        return self._eps[traj_id]
+
+    def dump_path(self, traj_id: int) -> str:
+        return self._info[traj_id].dump_path
+
+    def in_path(self, traj_id: int) -> str:
+        return self._info[traj_id].in_path
+
+
+class GeometryFrameDataset(Dataset):
+    """Flatten trajectories into (normalized geometry, raw epsilons, trajectory ID).
+
+    Distances are min/max scaled to [-1, 1]; angles are divided by pi.
+    Ranges come from these trajectories unless supplied explicitly.
     """
 
-    def __init__(self, root, trajectory_id=None,
-                 start_step=START_STEP, contact_cutoff=CONTACT_CUTOFF):
-        self.root = Path(root)
-        self.start_step = start_step
-        self.contact_cutoff = contact_cutoff
+    target_columns = TARGET_COLUMNS
+    distance_indices = (0, 1, 2)
+    angle_indices = (3, 4)
+    target_dim = 5
 
-        if trajectory_id is None:
-            directories = sorted(
-                p for p in self.root.iterdir()
-                if p.is_dir() and p.name.isdigit()
-                and (p / "dump.lammpstrj").is_file()
-                and (p / "in.in").is_file()
-            )
+    def __init__(self, traj_ds, eps_range=None, distance_range=None):
+        self.traj_ds = traj_ds
+        self.offsets = [0]
+        self.eps_raw = []
+        all_targets = []
+
+        for tid in range(len(traj_ds)):
+            s = traj_ds[tid]
+            target = s["target"]
+            if torch.is_tensor(target):
+                target_np = target.detach().cpu().numpy().astype(np.float32)
+            else:
+                target_np = np.asarray(target, dtype=np.float32)
+            if target_np.ndim != 2 or target_np.shape[1] != self.target_dim:
+                raise ValueError(f"Expected target shape [T, 5], got {target_np.shape}")
+
+            self.offsets.append(self.offsets[-1] + len(target_np))
+            all_targets.append(target_np)
+
+            e = s["eps"]
+            e_np = e.detach().cpu().numpy().astype(np.float32) if torch.is_tensor(e) else np.asarray(e, dtype=np.float32)
+            if e_np.shape != (2,):
+                raise ValueError(f"Expected eps shape [2], got {e_np.shape}")
+            self.eps_raw.append(e_np)
+
+        self.total = self.offsets[-1]
+        if self.total <= 0:
+            raise ValueError("No frames found.")
+
+        eps_values = np.stack(self.eps_raw, axis=0)
+        if eps_range is None:
+            self.eps_min = eps_values.min(axis=0).astype(np.float32)
+            self.eps_max = eps_values.max(axis=0).astype(np.float32)
         else:
-            directory = self.root / f"{int(trajectory_id):04d}"
-            if not (directory / "dump.lammpstrj").is_file():
-                raise FileNotFoundError(directory / "dump.lammpstrj")
-            if not (directory / "in.in").is_file():
-                raise FileNotFoundError(directory / "in.in")
-            directories = [directory]
+            r = np.asarray(eps_range, dtype=np.float32)
+            if r.shape == (2,):
+                self.eps_min = np.array([r[0], r[0]], dtype=np.float32)
+                self.eps_max = np.array([r[1], r[1]], dtype=np.float32)
+            elif r.shape == (2, 2):
+                self.eps_min = r[0].astype(np.float32)
+                self.eps_max = r[1].astype(np.float32)
+            else:
+                raise ValueError("eps_range must be (min, max) or ((eps1_min, eps2_min), (eps1_max, eps2_max)).")
 
-        if not directories:
-            raise FileNotFoundError(
-                f"No trajectory folders with dump.lammpstrj and in.in under {self.root}"
-            )
+        if np.any(self.eps_max <= self.eps_min):
+            raise ValueError("Invalid epsilon range.")
 
-        self.trajectories = []
-        self._ends = []
-        self.excluded_frames = 0
-        total = 0
-        offdiag_min = np.inf
-        distance_max = -np.inf
+        targets = np.concatenate(all_targets, axis=0)
+        if distance_range is None:
+            self.distance_min = targets[:, 0:3].min(axis=0).astype(np.float32)
+            self.distance_max = targets[:, 0:3].max(axis=0).astype(np.float32)
+        else:
+            dr = np.asarray(distance_range, dtype=np.float32)
+            if dr.shape != (2, 3):
+                raise ValueError("distance_range must have shape [(r12_min,r23_min,r34_min), (r12_max,r23_max,r34_max)].")
+            self.distance_min = dr[0].astype(np.float32)
+            self.distance_max = dr[1].astype(np.float32)
 
-        for directory in directories:
-            epsilons = self._read_eps(directory / "in.in")
-            offsets, traj_min, traj_max, excluded = self._index_retained_frames(
-                directory / "dump.lammpstrj"
-            )
-            self.excluded_frames += excluded
-            if len(offsets) == 0:
-                continue
+        span = self.distance_max - self.distance_min
+        bad = span <= 0
+        if np.any(bad):
+            self.distance_min = self.distance_min.copy()
+            self.distance_max = self.distance_max.copy()
+            self.distance_min[bad] -= 0.5
+            self.distance_max[bad] += 0.5
 
-            self.trajectories.append({
-                "id": int(directory.name),
-                "dump": directory / "dump.lammpstrj",
-                "epsilons": epsilons,
-                "offsets": offsets,
-                "excluded_frames": excluded,
-            })
-            total += len(offsets)
-            self._ends.append(total)
-            offdiag_min = min(offdiag_min, traj_min)
-            distance_max = max(distance_max, traj_max)
-
-        if not self.trajectories:
-            raise ValueError("No trajectory reached the contact criterion.")
-
-        eps_values = np.array([traj["epsilons"] for traj in self.trajectories])
-        self.ranges = {
-            "epsilons": tuple(
-                (float(values.min()), float(values.max())) for values in eps_values.T
-            ),
-            "distance": (0.0, float(distance_max)),
-            "distance_off_diagonal": (float(offdiag_min), float(distance_max)),
-        }
+        self.target_min = np.concatenate([self.distance_min, np.array([-math.pi, -math.pi], dtype=np.float32)])
+        self.target_max = np.concatenate([self.distance_max, np.array([math.pi, math.pi], dtype=np.float32)])
 
     def __len__(self):
-        return self._ends[-1]
+        return self.total
 
-    def __getitem__(self, index):
-        if index < 0:
-            index += len(self)
-        if index < 0 or index >= len(self):
-            raise IndexError(index)
+    def _locate(self, idx: int):
+        tid = bisect.bisect_right(self.offsets, idx) - 1
+        frame = idx - self.offsets[tid]
+        return tid, frame
 
-        traj_index = bisect_right(self._ends, index)
-        start = 0 if traj_index == 0 else self._ends[traj_index - 1]
-        local_index = index - start
-        traj = self.trajectories[traj_index]
+    def normalize_target(self, target) -> torch.Tensor:
+        target_t = torch.as_tensor(target, dtype=torch.float32)
+        device = target_t.device
+        dmin = torch.as_tensor(self.distance_min, device=device, dtype=target_t.dtype)
+        dmax = torch.as_tensor(self.distance_max, device=device, dtype=target_t.dtype)
 
-        step, positions, lengths, periodic = self._read_frame(
-            traj["dump"], int(traj["offsets"][local_index])
-        )
-        distances = self._distance_matrix(positions, lengths, periodic)
+        out = torch.empty_like(target_t)
+        out[..., 0:3] = 2.0 * (target_t[..., 0:3] - dmin) / (dmax - dmin) - 1.0
+        out[..., 3:5] = target_t[..., 3:5] / math.pi
+        return out
 
-        return {
-            "frame_id": step,
-            "trajectory_id": traj["id"],
-            "epsilons": torch.tensor(traj["epsilons"], dtype=torch.float32),
-            "distances": torch.from_numpy(distances.astype(np.float32, copy=False)),
-        }
+    def denormalize_target(self, x_norm: torch.Tensor, clamp: bool = True) -> torch.Tensor:
+        x = torch.as_tensor(x_norm, dtype=torch.float32, device=x_norm.device if torch.is_tensor(x_norm) else None)
+        if clamp:
+            x = x.clamp(-1.0, 1.0)
+        dmin = torch.as_tensor(self.distance_min, device=x.device, dtype=x.dtype)
+        dmax = torch.as_tensor(self.distance_max, device=x.device, dtype=x.dtype)
 
-    def trajectory(self, trajectory_id):
-        """Return a Subset containing only frames from one trajectory ID."""
-        trajectory_id = int(trajectory_id)
-        for i, traj in enumerate(self.trajectories):
-            if traj["id"] == trajectory_id:
-                start = 0 if i == 0 else self._ends[i - 1]
-                return Subset(self, range(start, self._ends[i]))
-        raise KeyError(f"Trajectory {trajectory_id:04d} is not in this dataset.")
+        out = torch.empty_like(x)
+        out[..., 0:3] = dmin + 0.5 * (x[..., 0:3] + 1.0) * (dmax - dmin)
+        angles = math.pi * x[..., 3:5]
+        out[..., 3:5] = torch.atan2(torch.sin(angles), torch.cos(angles))
+        return out
 
-    @staticmethod
-    def _read_eps(in_file):
-        """Read explicit self coefficients; cross interactions use geometric mixing."""
-        eps = {}
-        for line in in_file.read_text().splitlines():
-            fields = line.split("#", 1)[0].split()
-            if not fields or fields[0] != "pair_coeff":
-                continue
-            if (len(fields) < 4 or not fields[1].isdigit()
-                    or fields[1] != fields[2] or not 1 <= int(fields[1]) <= 10):
-                raise ValueError(
-                    f"Expected explicit pair_coeff i i epsilon for types 1..10 in {in_file}"
-                )
-            value = float(fields[3])
-            if not np.isfinite(value) or value <= 0:
-                raise ValueError(f"Epsilons must be finite and positive in {in_file}")
-            eps[int(fields[1])] = value
+    def target_angles(self, target: torch.Tensor) -> torch.Tensor:
+        return target[..., 3:5]
 
-        missing = set(range(1, 11)) - eps.keys()
-        if missing:
-            raise ValueError(f"Missing pair_coeff for types {sorted(missing)} in {in_file}")
-        return tuple(eps[i] for i in range(1, 11))
+    def get_traj_eps_raw(self, tid: int) -> tuple[float, float]:
+        eps = self.eps_raw[tid]
+        return float(eps[0]), float(eps[1])
 
-    def _index_retained_frames(self, dump_file):
-        offsets = []
-        excluded = 0
-        offdiag_min = np.inf
-        distance_max = -np.inf
-        offdiag_mask = ~np.eye(10, dtype=bool)
-
-        with dump_file.open("rb") as dump:
-            while True:
-                offset = dump.tell()
-                line = dump.readline()
-                if not line:
-                    break
-                if line.strip() != b"ITEM: TIMESTEP":
-                    if (not line.endswith(b"\n")
-                            and b"ITEM: TIMESTEP".startswith(line.strip())):
-                        warnings.warn(
-                            f"Skipping truncated final frame header in {dump_file} "
-                            f"at byte offset {offset}.",
-                            stacklevel=2,
-                        )
-                        break
-                    warnings.warn(
-                        f"Skipping data outside a frame in {dump_file} at byte offset "
-                        f"{offset}: expected ITEM: TIMESTEP, got {line.strip()[:100]!r}.",
-                        stacklevel=2,
-                    )
-                    while line and b"ITEM: TIMESTEP" not in line:
-                        line = dump.readline()
-                    if line:
-                        dump.seek(line.index(b"ITEM: TIMESTEP") - len(line), 1)
-                    continue
-
-                header = []
-                for _ in range(8):
-                    line = dump.readline()
-                    marker = line.find(b"ITEM: TIMESTEP")
-                    if marker >= 0:
-                        warnings.warn(
-                            f"Skipping incomplete frame header in {dump_file} "
-                            f"at byte offset {offset}, timestep "
-                            f"{header[0].strip() if header else b'unknown'!r}: "
-                            f"next timestep marker encountered in {line.strip()!r}.",
-                            stacklevel=2,
-                        )
-                        dump.seek(marker - len(line), 1)
-                        break
-                    header.append(line)
-                if len(header) < 8:
-                    continue
-                if any(not line.endswith(b"\n") for line in header):
-                    warnings.warn(
-                        f"Skipping truncated final frame header in {dump_file} "
-                        f"at byte offset {offset}, timestep {header[0].strip()!r}.",
-                        stacklevel=2,
-                    )
-                    break
-                step = int(header[0])
-                if header[1].strip() != b"ITEM: NUMBER OF ATOMS":
-                    raise ValueError(
-                        f"Expected ITEM: NUMBER OF ATOMS in {dump_file} at step {step}, "
-                        f"frame byte offset {offset}; got {header[1].strip()!r}"
-                    )
-                number_of_atoms = int(header[2])
-
-                box_header = header[3].decode().split()
-                if box_header[:3] != ["ITEM:", "BOX", "BOUNDS"] or len(box_header) != 6:
-                    raise ValueError("Only orthogonal simulation boxes are supported.")
-                periodic = np.array([flag == "pp" for flag in box_header[3:5]])
-                bounds = np.array([
-                    list(map(float, line.split())) for line in header[4:7]
-                ])
-                lengths = bounds[:2, 1] - bounds[:2, 0]
-
-                columns = header[7].decode().split()[2:]
-                id_column = columns.index("id")
-                type_column = columns.index("type")
-                xy_columns = [columns.index(axis) for axis in ("x", "y")]
-
-                need_positions = step >= self.start_step
-                positions = {} if need_positions else None
-
-                complete = True
-                for atom_index in range(number_of_atoms):
-                    line = dump.readline()
-                    fields = line.split()
-                    if (len(fields) != len(columns) or fields[0] == b"ITEM:"
-                            or b"ITEM: TIMESTEP" in line):
-                        warnings.warn(
-                            f"Skipping incomplete atom block in {dump_file} at step {step}: "
-                            f"expected {number_of_atoms} rows with {len(columns)} columns, "
-                            f"read {atom_index} complete rows.",
-                            stacklevel=2,
-                        )
-                        # Resume at the next frame, keeping its header unread.
-                        while line and b"ITEM: TIMESTEP" not in line:
-                            line = dump.readline()
-                        if line:
-                            dump.seek(line.index(b"ITEM: TIMESTEP") - len(line), 1)
-                        complete = False
-                        break
-                    if need_positions:
-                        atom_id = int(fields[id_column])
-                        if 1 <= atom_id <= 10:
-                            if int(fields[type_column]) != atom_id:
-                                raise ValueError(
-                                    f"Atom type must equal atom ID 1..10 in {dump_file} at step {step}"
-                                )
-                            positions[atom_id] = [
-                                float(fields[column]) for column in xy_columns
-                            ]
-
-                if not complete or step < self.start_step:
-                    continue
-                if len(positions) < 10:
-                    raise ValueError(f"Expected atom IDs 1..10 in {dump_file} at step {step}")
-
-                ordered = np.array([positions[i] for i in ATOM_IDS], dtype=float)
-
-                distances = self._distance_matrix(ordered, lengths, periodic)
-                if not (distances[:5, 5:] <= self.contact_cutoff).any():
-                    excluded += 1
-                    continue
-                offdiag_min = min(offdiag_min, float(distances[offdiag_mask].min()))
-                distance_max = max(distance_max, float(distances.max()))
-                offsets.append(offset)
-
-        return np.asarray(offsets, dtype=np.uint64), offdiag_min, distance_max, excluded
-
-    @staticmethod
-    def _read_frame(dump_file, offset):
-        with dump_file.open("rb") as dump:
-            dump.seek(offset)
-            if dump.readline().strip() != b"ITEM: TIMESTEP":
-                raise ValueError(f"Bad frame offset {offset} in {dump_file}")
-            step = int(dump.readline())
-
-            dump.readline()  # ITEM: NUMBER OF ATOMS
-            number_of_atoms = int(dump.readline())
-
-            box_header = dump.readline().decode().split()
-            if box_header[:3] != ["ITEM:", "BOX", "BOUNDS"] or len(box_header) != 6:
-                raise ValueError("Only orthogonal simulation boxes are supported.")
-            periodic = np.array([flag == "pp" for flag in box_header[3:5]])
-            bounds = np.array([
-                list(map(float, dump.readline().split())) for _ in range(3)
-            ])
-            lengths = bounds[:2, 1] - bounds[:2, 0]
-
-            columns = dump.readline().decode().split()[2:]
-            id_column = columns.index("id")
-            type_column = columns.index("type")
-            xy_columns = [columns.index(axis) for axis in ("x", "y")]
-
-            positions = np.empty((10, 2), dtype=float)
-            seen = np.zeros(10, dtype=bool)
-            for atom_index in range(number_of_atoms):
-                fields = dump.readline().split()
-                if len(fields) != len(columns) or fields[0] == b"ITEM:":
-                    raise ValueError(
-                        f"Incomplete atom block in {dump_file} at step {step}: "
-                        f"expected {number_of_atoms} rows with {len(columns)} columns, "
-                        f"read {atom_index} complete rows."
-                    )
-                atom_id = int(fields[id_column])
-                if 1 <= atom_id <= 10:
-                    if int(fields[type_column]) != atom_id:
-                        raise ValueError(
-                            f"Atom type must equal atom ID 1..10 in {dump_file} at step {step}"
-                        )
-                    positions[atom_id - 1] = [
-                        float(fields[column]) for column in xy_columns
-                    ]
-                    seen[atom_id - 1] = True
-
-            if not seen.all():
-                raise ValueError(f"Expected atom IDs 1..10 in {dump_file} at step {step}")
-
-        return step, positions, lengths, periodic
-
-    @staticmethod
-    def _distance_matrix(positions, lengths, periodic):
-        delta = positions[:, None, :] - positions[None, :, :]
-        delta[..., periodic] -= lengths[periodic] * np.rint(
-            delta[..., periodic] / lengths[periodic]
-        )
-        return np.sqrt(np.sum(delta * delta, axis=-1))
-
+    def __getitem__(self, idx: int):
+        tid, frame = self._locate(idx)
+        s = self.traj_ds[tid]
+        target = s["target"][frame].to(torch.float32)
+        x0 = self.normalize_target(target)
+        eps = torch.from_numpy(np.asarray(self.eps_raw[tid], dtype=np.float32))
+        return x0, eps, torch.tensor(tid, dtype=torch.int64)
