@@ -58,7 +58,7 @@ dump.lammpstrj
 log.lammps
 ```
 
-Run remove_no_contact.py keep only frames in contact:
+Run remove_no_contact.py keep only frames in contact and removes runs with frame count of less than 2048 frames:
 
 ```bash
 python remove_no_contact.py
