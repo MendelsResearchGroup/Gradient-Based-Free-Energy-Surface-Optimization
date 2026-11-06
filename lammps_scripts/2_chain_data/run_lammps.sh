@@ -26,5 +26,3 @@ done
 if [[ "$found" -eq 0 ]]; then
   echo "No subfolders found under $root" >&2
 fi
-~                                                                                                                                                                                             
-~     
