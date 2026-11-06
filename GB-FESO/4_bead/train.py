@@ -135,11 +135,7 @@ def load_checkpoint(
     root_dir: str | None = None,
     device: str | None = None,
 ) -> tuple[AngleDiffusion, GeometryFrameDataset, TrainConfig]:
-    """Load weights and build frame normalization from root_dir, as during training.
-
-    Use the training data to preserve its distance ranges. Supplying another
-    dataset recomputes those ranges; the stored checkpoint ranges are metadata.
-    """
+    """Load weights, distance scaling, and epsilon bounds from the checkpoint."""
     device = device or ("cuda" if torch.cuda.is_available() else "cpu")
     checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
 
@@ -152,7 +148,11 @@ def load_checkpoint(
     cfg_fields = TrainConfig.__dataclass_fields__
     cfg = TrainConfig(**{k: v for k, v in cfg_dict.items() if k in cfg_fields})
 
-    frame_ds = make_frame_dataset(cfg.root_dir)
+    frame_ds = GeometryFrameDataset(
+        LammpsTrajectoryGeometryDataset(cfg.root_dir),
+        eps_range=(checkpoint["eps_min"], checkpoint["eps_max"]),
+        distance_range=(checkpoint["distance_min"], checkpoint["distance_max"]),
+    )
     model = build_model(cfg).to(cfg.device)
     model.load_state_dict(checkpoint["model_state_dict"])
     model.eval()

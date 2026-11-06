@@ -30,7 +30,7 @@ Set the data path and settings in `train.py`:
 python train.py
 ```
 
-The best training-loss checkpoint is saved to `ddpm_best_epoch_XXXX.pt`. Distance scaling is recomputed from the supplied dataset when loading checkpoints.
+The best training-loss checkpoint is saved to `ddpm_best_epoch_XXXX.pt`. Loading restores its training distance scaling and epsilon bounds, including for a single validation trajectory.
 
 ## Optimization
 
@@ -45,7 +45,8 @@ python run_feso.py
 | `loss_dim` | `2`: angles; `5`: distances and angles |
 | `loss_type` | `"kl"` or `"mmd"` |
 | `optimize_eps` | `"eps1"`, `"eps2"`, or `"both"` |
-| `clamp_eps` | Restrict epsilons to the loaded dataset's range |
+| `fixed_eps_raw` | `None`: keep the other epsilon at its target value; a number overrides it. Ignored for `"both"`. |
+| `clamp_eps` | Restrict epsilons to the checkpoint's training range |
 
 Learning rates, steps, bandwidths, and sample counts are set in the same configuration. Losses use raw distance units and radians.
 

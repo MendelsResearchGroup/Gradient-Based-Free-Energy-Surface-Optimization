@@ -47,7 +47,7 @@ class EpsilonOptConfig:
     phase0_eps_noise_std: float = 0.05
     phase0_high_high_eps_noise_std: float = 0.005
     high_high_eps_threshold: float = 0.9
-    clamp_eps: bool = False                  # Clamp to the loaded dataset's epsilon range.
+    clamp_eps: bool = False                  # Clamp to the checkpoint's training epsilon range.
     eval_basin_metrics: bool = True
     basin_half_width: Optional[float] = None
     active_target_prob: float = 0.05

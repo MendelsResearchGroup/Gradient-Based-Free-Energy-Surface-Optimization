@@ -226,7 +226,7 @@ if __name__ == "__main__":
         loss_dim=2,                     # 2 or 5; final scoring always uses 5.
         loss_type="kl",                 # "kl" or "mmd"
         optimize_eps="both",            # "eps1", "eps2", or "both"
-        fixed_eps_raw=0.5,
+        fixed_eps_raw=None,             # Keep the other epsilon at its target value.
         clamp_eps=True,
         kde_bandwidth=0.5,
         mmd_bandwidth=0.32,
