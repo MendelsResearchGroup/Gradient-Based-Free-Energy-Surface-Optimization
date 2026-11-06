@@ -17,7 +17,7 @@ if [[ ! -f "$DATA_FILE" ]]; then
     exit 1
 fi
 
-for dir in "$ROOT"/*/; do
+for dir in "$ROOT"/[0-9][0-9][0-9]/; do
     [[ -d "$dir" ]] || continue
 
     echo "Processing: $dir"
