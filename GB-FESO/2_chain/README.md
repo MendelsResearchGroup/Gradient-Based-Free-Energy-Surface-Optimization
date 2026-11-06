@@ -20,7 +20,7 @@ data/
 
 Each numbered folder contains one trajectory. Atom types equal atom IDs: 1–5 for chain 1, 6–10 for chain 2. Inputs require ten self-interaction `pair_coeff` entries; dumps require `id type x y` columns and orthogonal boxes.
 
-The loader retains timesteps ≥1000 with an inter-chain distance ≤2.25, using 2D minimum-image distances. Simulations must share temperature and other physical parameters apart from epsilons.
+The loader retains timesteps with an inter-chain distance ≤2.2, using 2D minimum-image distances. Simulations must share temperature and other physical parameters apart from epsilons.
 
 ## Training
 
@@ -51,7 +51,7 @@ python optimizer_rmsd.py --help
 Set `RUNS_DIR` and `OUTPUT_DIR` in `analyze_results.py`:
 
 ```bash
-python analyzer.py
+python analyze_results.py
 ```
 
 Analysis uses saved optimization results. Basin bounds are defined in `analyzer.py`. ΔG/(kBT) = −ln(P_C/P_A); both basins must contain ≥10% of frames in both ensembles. The free-energy interpretation assumes equilibrium sampling of the contact-conditioned ensemble.
