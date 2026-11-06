@@ -4,13 +4,7 @@ Train a conditional DDPM for two five-bead chains in 2D and optimize chain-1 eps
 
 ## Requirements
 
-Python 3, PyTorch, NumPy, Matplotlib, and tqdm. Versions are listed in `requirements.txt`.
-
-Run commands from this folder:
-
-```bash
-cd publication
-```
+Python 3, PyTorch, NumPy, Matplotlib, and tqdm. Versions are listed in `requirements.txt`. Run commands from this folder
 
 ## Dataset
 
