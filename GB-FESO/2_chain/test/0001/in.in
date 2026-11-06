@@ -1,0 +1,52 @@
+units           lj
+dimension       2
+boundary        p p p
+
+atom_style      angle
+
+# Define interaction styles BEFORE reading topology
+pair_style      lj/cut 4.0
+bond_style      harmonic
+angle_style     harmonic
+
+# Read atoms, bonds, and angles; this creates the simulation box
+read_data       data.polyLJ
+
+# Coefficients AFTER read_data
+pair_modify     mix geometric
+pair_coeff      1 1 1.081250 1.5
+pair_coeff      2 2 0.368750 1.5
+pair_coeff      3 3 0.487500 1.5
+pair_coeff      4 4 0.843750 1.5
+pair_coeff      5 5 0.368750 1.5
+pair_coeff      6 6 0.250000 1.5
+pair_coeff      7 7 0.368750 1.5
+pair_coeff      8 8 0.843750 1.5
+pair_coeff      9 9 0.606250 1.5
+pair_coeff      10 10 1.081250 1.5
+
+bond_coeff      1 80.15 1.5
+
+# Small bending stiffness toward straight configuration
+angle_coeff     1 0.25 180.0
+
+# Keep LJ between bonded neighbors
+special_bonds   lj 1.0 1.0 1.0
+
+# Neighbor list
+neighbor        0.3 bin
+neigh_modify    delay 0 every 1 check yes
+
+# Temperature / dynamics
+velocity        all create 0.08 12345 mom yes rot no dist gaussian
+fix             thermo all langevin 0.13 0.13 1.0 373682757
+timestep        0.005
+fix             integ all nve
+fix             3 all enforce2d
+
+# Output
+thermo          20000
+thermo_style    custom step temp pe ke etotal
+dump            traj all custom 20000 dump.lammpstrj id type x y z vx vy vz
+
+run             100000000
