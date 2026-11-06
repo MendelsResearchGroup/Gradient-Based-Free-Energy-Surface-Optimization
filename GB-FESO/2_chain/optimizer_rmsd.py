@@ -41,7 +41,7 @@ def parse_arguments(arguments=None):
     parser.add_argument("--target-frames", type=int, default=2048, help="Maximum evenly spaced retained target frames")
     parser.add_argument("--evaluation-frames", type=int, default=2048, help="Independent generated ensemble size")
     parser.add_argument("--ddim-steps", type=int, default=50, help="Deterministic DDIM steps")
-    parser.add_argument("--guidance-scale", type=float, default=0.99, help="Classifier-free guidance scale")
+    parser.add_argument("--guidance-scale", type=float, default=1.0, help="Classifier-free guidance scale")
     parser.add_argument("--mmd-bandwidth", type=float, default=0.32, help="Gaussian sigma in RMSD length units")
     parser.add_argument("--seed", type=int, default=0, help="Sampling and optimization-noise seed; random starts use fresh entropy")
     parser.add_argument("--plot-every", type=int, default=50, help="Plot interval within each phase")
