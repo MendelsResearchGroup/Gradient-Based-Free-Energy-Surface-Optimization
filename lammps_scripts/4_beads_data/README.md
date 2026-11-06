@@ -1,8 +1,6 @@
 # Four-bead LAMMPS dataset generation
 
-Generate trajectories for a four-bead chain with randomized Lennard-Jones
-interaction strengths. Each run produces the same file format with newly sampled
-parameters; it does not recreate a particular previously generated dataset.
+These scripts generate trajectories of four-bead chain in 2D using reduced Lennard-Jones units and harmonic bonds. Each bead independently samples its epsilon from a range: Epsilon 1 is sampled uniformly from `[0.21, 1.55]` for pairs 1–2, 2–3, and 3–4. Epsilon 2 is sampled independently from `[0.21, 1.55]` for pairs 1–3 and 2–4. The 1–4 epsilon is fixed at `0.5`
 
 ## Requirements
 
@@ -58,7 +56,6 @@ python3 plot_distributions.py .
 This writes `001_angle_heatmap.png`, etc., alongside the trajectory folders.
 On a machine without a display, prefix the command with `MPLBACKEND=Agg`.
 
-## Simulation settings
 
 `gener.py` defines the simulation in reduced Lennard-Jones units:
 
