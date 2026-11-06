@@ -34,10 +34,10 @@ The best training-loss checkpoint is saved to `ddpm_best_epoch_XXXX.pt`. Distanc
 
 ## Optimization
 
-Set `DATA_ROOT`, `CHECKPOINT_PATH`, starting pairs, trajectory IDs, and configuration at the bottom of `ddpm_recovery.py`:
+Set `DATA_ROOT`, `CHECKPOINT_PATH`, starting pairs, trajectory IDs, and configuration at the bottom of `run_feso.py`:
 
 ```bash
-python ddpm_recovery.py
+python run_feso.py
 ```
 
 | Setting | Options |

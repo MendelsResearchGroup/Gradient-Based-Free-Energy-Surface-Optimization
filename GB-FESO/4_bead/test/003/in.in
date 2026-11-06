@@ -1,0 +1,49 @@
+# 4 bead types LJ + weak bond, proper 2D, very low temperature
+# same-type epsilon is 0
+# cross epsilons are randomized in [0.21, 0.5] at generation time
+
+units           lj
+dimension       2
+atom_style      bond
+boundary        p p p          # in 2D, z must be periodic
+
+read_data       data.polyLJ
+
+# Keep LJ between bonded neighbors
+special_bonds lj 1.0 1.0 1.0
+
+# Neighbor list
+neighbor        0.3 bin
+neigh_modify    delay 0 every 1 check yes
+
+# LJ: explicit pair coefficients
+pair_style      lj/cut 4.0
+#pair_modify     mix geometric
+pair_coeff      1 1 0.000000 1.0
+pair_coeff      2 2 0.000000 1.0
+pair_coeff      3 3 0.000000 1.0
+pair_coeff      4 4 0.000000 1.0
+pair_coeff      1 2 0.434999 1.0
+pair_coeff      1 3 0.359155 1.0
+pair_coeff      1 4 0.500000 1.0
+pair_coeff      2 3 0.434999 1.0
+pair_coeff      2 4 0.359155 1.0
+pair_coeff      3 4 0.434999 1.0
+
+# Weak bond to prevent separation
+bond_style      harmonic
+bond_coeff      1 0.15 1.5
+
+# Very low temperature
+velocity        all create 0.09 12345 mom yes rot no dist gaussian
+fix             thermo all langevin 0.09 0.09 1.0 12345
+timestep        0.005
+fix             integ all nve
+fix             3 all enforce2d
+
+# Output
+thermo          100
+thermo_style    custom step temp pe ke etotal
+dump            traj all custom 200 dump.lammpstrj id type x y z vx vy vz
+
+run             4000000
