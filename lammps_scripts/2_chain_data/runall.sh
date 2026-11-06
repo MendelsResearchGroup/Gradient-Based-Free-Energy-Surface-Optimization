@@ -1,10 +1,30 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-base=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+root="$(pwd)"
 
-for directory in "$base"/*/; do
-    [[ -f "$directory/in.in" ]] || continue
-    echo "Running LAMMPS in $directory"
-    (cd -- "$directory" && bash "$base/lmp.sh")
+if [[ $# -eq 0 ]]; then
+  echo "Usage: $0 <lammps_command_or_path> [args...]" >&2
+  echo "Example: $0 lmp -in input.lammps" >&2
+  echo "Example: $0 /path/to/lmp_mpi -in input.lammps" >&2
+  exit 1
+fi
+
+found=0
+
+for dir in "$root"/*/; do
+  [[ -d "$dir" ]] || continue
+  found=1
+
+  echo "Running in: $dir"
+  (
+    cd "$dir"
+    "$@"
+  )
 done
+
+if [[ "$found" -eq 0 ]]; then
+  echo "No subfolders found under $root" >&2
+fi
+~                                                                                                                                                                                             
+~     
