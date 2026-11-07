@@ -45,7 +45,7 @@ Run LAMMPS in every trajectory folder, replacing the executable path:
 bash run_lammps.sh /path/to/lmp -in in.in
 ```
 
-Each simulation runs for 100,000,000 steps with timestep `0.005`, Langevin temperature `0.13`, and trajectory output every 2,000 steps. These settings are defined in `gener.py`.
+You can change number of steps and trajectory output count defined in `gener.py`.
 
 ## Outputs
 
