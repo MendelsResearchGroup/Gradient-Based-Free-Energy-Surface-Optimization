@@ -230,7 +230,7 @@ if __name__ == "__main__":
         clamp_eps=True,
         kde_bandwidth=0.5,
         mmd_bandwidth=0.32,
-        kl_lambda=1.0,
+        kl_lambda=0.0,
         steps=201,
         lr=5e-2,
         lr_refine=5e-2,
