@@ -54,7 +54,7 @@ Set `RUNS_DIR` and `OUTPUT_DIR` in `analyze_results.py`:
 python analyze_results.py
 ```
 
-Analysis uses saved optimization results. Basin bounds are defined in `analyzer.py`. ΔG/(kBT) = −ln(P_C/P_A); both basins must contain ≥10% of frames in both ensembles. The free-energy interpretation assumes equilibrium sampling of the contact-conditioned ensemble.
+Analysis uses saved optimization results. Basin bounds are defined in `analyze_results.py`. ΔG/(kBT) = −ln(P_C/P_A); both basins must contain ≥10% of frames in both ensembles. The free-energy interpretation assumes equilibrium sampling of the contact-conditioned ensemble.
 
 ## Outputs
 
